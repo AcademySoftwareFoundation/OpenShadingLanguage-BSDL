@@ -73,6 +73,21 @@ struct BsdfGlobal {
 struct BsdfAssignment {
     std::size_t parameter_index;
     std::size_t globals_offset;
+    // A and B remap a float global x in [0, 1] to A + x * (B - A).
+    // A == B == 0 means no remap.
+    float float_lerp_A = 0;
+    float float_lerp_B = 0;
+};
+
+// One BSDF as specified on the command line: its registry description, the
+// parameter data, the assignments from shading globals to parameters and an
+// optional color weight. render() takes a list of these and combines them
+// with a GroupBsdf.
+struct BsdfInstance {
+    const BsdfDescription*      description = nullptr;
+    BsdfDataStorage             data{};
+    std::vector<BsdfAssignment> assignments;
+    Imath::C3f                  weight = { 1, 1, 1 };
 };
 
 const BsdfGlobal* find_bsdf_global(std::string_view name);
@@ -86,13 +101,11 @@ struct SimpleSphere : public Scene {
     float      bite_radius = 1.3f;
 };
 
-void render(const SimpleSphere&                scene,
-            const BsdfDescription&             description,
-            const BsdfDataStorage&             bsdf_data,
-            const std::vector<BsdfAssignment>& assignments,
-            std::vector<Imath::C3f>&           image,
-            int                                resolution,
-            int                                samples,
-            int                                depth,
-            unsigned                           seed,
-            unsigned                           threads = 0);
+void render(const SimpleSphere&              scene,
+            const std::vector<BsdfInstance>& instances,
+            std::vector<Imath::C3f>&         image,
+            int                              resolution,
+            int                              samples,
+            int                              depth,
+            unsigned                         seed,
+            unsigned                         threads = 0);

@@ -9,12 +9,14 @@ using BSDLConfig = bsdl::BSDLDefaultConfig;
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <stdexcept>
 #include <thread>
 
 namespace
 {
 
-constexpr float PI = 3.14159265358979323846f;
+constexpr float PI      = 3.14159265358979323846f;
+constexpr float MIN_PDF = 1e-4f;
 
 Imath::V3f sample_cone(const Imath::V3f& direction, float angle, const Imath::V3f& random)
 {
@@ -55,14 +57,17 @@ Imath::C3f ground_color(const SimpleSphere& scene, const Imath::V3f& position)
     return ((x + z) & 1) ? scene.ground_color1 : scene.ground_color2;
 }
 
-void shade(BsdfDataStorage&                   shaded_data,
-           const BsdfDescription&             description,
-           const BsdfDataStorage&             data,
-           const Scene::BsdfGlobals&          globals,
-           const std::vector<BsdfAssignment>& assignments)
+// Build the lobe for one BSDF instance: copy its parameter data, apply the
+// assignments from shading globals on top (with optional [A, B] float remap)
+// and construct the lobe in 'storage'.
+Bsdf* build_bsdf(BsdfStorage&              storage,
+                 const BsdfInstance&       instance,
+                 const Scene::BsdfGlobals& globals)
 {
-    std::memcpy(&shaded_data, &data, description.data_size);
-    for (const BsdfAssignment& assignment : assignments) {
+    const BsdfDescription& description = *instance.description;
+    BsdfDataStorage        shaded_data;
+    std::memcpy(&shaded_data, &instance.data, description.data_size);
+    for (const BsdfAssignment& assignment : instance.assignments) {
         const bsdl::LobeParam& parameter =
             description.parameters[assignment.parameter_index].lobe_parameter;
         std::memcpy(static_cast<char*>(static_cast<void*>(&shaded_data)) +
@@ -70,18 +75,90 @@ void shade(BsdfDataStorage&                   shaded_data,
                     static_cast<const char*>(static_cast<const void*>(&globals)) +
                         assignment.globals_offset,
                     parameter.type_size);
+        if (assignment.float_lerp_A != 0 || assignment.float_lerp_B != 0) {
+            float& value = *reinterpret_cast<float*>(
+                static_cast<char*>(static_cast<void*>(&shaded_data)) + parameter.offset);
+            value = assignment.float_lerp_A +
+                    value * (assignment.float_lerp_B - assignment.float_lerp_A);
+        }
+    }
+    return description.create_lobe(&storage,
+                                   &shaded_data,
+                                   globals.wo,
+                                   globals.Nf,
+                                   globals.Ngf,
+                                   globals.backfacing,
+                                   globals.path_roughness,
+                                   globals.outer_ior,
+                                   0);
+}
+
+// Build the BSDF used to shade a non-ground hit: one lobe per instance
+// combined in a layered 'over' group. Children are constructed in
+// storage[0..count-1] and the group in storage[count]; the returned pointer
+// (and the group's child pointers) all live in 'storage'.
+Bsdf* shade(BsdfStorage (&storage)[GROUP_BSDF_MAX + 1],
+            const std::vector<BsdfInstance>& instances,
+            const Scene::BsdfGlobals&        globals)
+{
+    const int count = std::min<int>(instances.size(), GROUP_BSDF_MAX);
+    Bsdf*     children[GROUP_BSDF_MAX];
+    // Layered 'over' combination: each BSDF is weighted by the
+    // product of the filters of all the BSDFs on top of it.
+    bsdl::Power filter = bsdl::Power::UNIT();
+    for (int i = 0; i < count; ++i) {
+        children[i] = build_bsdf(storage[i], instances[i], globals);
+        // The instance weight composes with the layer filter.
+        children[i]->set_weight(instances[i].weight * filter.toRGB(0));
+        filter *= children[i]->filter_o(globals.wo);
+    }
+    return new (&storage[count]) GroupBsdf<GROUP_BSDF_MAX>(children, count);
+}
+
+// Accumulate each light directly into radiance to preserve summation order
+// across path vertices. All lights share the same random sample, as before.
+void direct_lighting(const SimpleSphere&       scene,
+                     const Bsdf&               bsdf,
+                     const Scene::BsdfGlobals& globals,
+                     const Ray&                ray,
+                     const Imath::V3f&         light_random,
+                     Imath::C3f&               radiance)
+{
+    for (const auto& light : scene.lights) {
+        const Imath::V3f   wi = sample_cone(light.direction, light.angle, light_random);
+        const bsdl::Sample sample       = bsdf.eval(globals.wo, wi);
+        const float        light_pdf    = cone_pdf(light.angle);
+        const float        light_weight = light.intensity / light_pdf;
+        if (sample.pdf <= MIN_PDF || light_pdf <= MIN_PDF)
+            continue;
+        const Ray  shadow_ray = { globals.P + wi * 1e-4f,
+                                  wi,
+                                  { 1, 1, 1 },
+                                  1e-4f,
+                                  1e30f,
+                                  globals.outer_ior,
+                                  globals.path_roughness,
+                                  light_pdf,
+                                  ray.x,
+                                  ray.y,
+                                  ray.sample_index,
+                                  ray.depth };
+        const bool visible    = !scene.shadows || scene.trace(shadow_ray).obj < 0;
+        if (visible && sample.pdf > 0)
+            radiance += ray.weight * sample.weight.toRGB(0) * sample.pdf *
+                        power_heuristic(light_pdf, sample.pdf) * light.color *
+                        light_weight;
     }
 }
 
-Imath::C3f trace(const SimpleSphere&                scene,
-                 const BsdfDescription&             description,
-                 const BsdfDataStorage&             data,
-                 const std::vector<BsdfAssignment>& assignments,
-                 Ray                                ray,
-                 int                                max_depth,
-                 unsigned                           seed)
+Imath::C3f trace(const SimpleSphere&              scene,
+                 const std::vector<BsdfInstance>& instances,
+                 Ray                              ray,
+                 int                              max_depth,
+                 unsigned                         seed)
 {
     Imath::C3f radiance(0);
+    float      path_roughness = 0;
     for (int depth = 0; depth <= max_depth; ++depth) {
         Rng light_rng(seed, ray.x, ray.y, ray.sample_index, depth);
         Rng bsdf_rng(seed ^ 0x9e3779b9u, ray.x, ray.y, ray.sample_index, depth);
@@ -92,13 +169,16 @@ Imath::C3f trace(const SimpleSphere&                scene,
             break;
         }
 
-        const Scene::BsdfGlobals globals = scene.globals_at_hit(ray, hit);
-        BsdfStorage              bsdf_storage;
-        Bsdf*                    bsdf;
+        Scene::BsdfGlobals globals = scene.globals_at_hit(ray, hit);
+        globals.path_roughness     = path_roughness;
+        // One slot per child BSDF (or the ground lobe), plus one for the
+        // group that combines them.
+        BsdfStorage storage[GROUP_BSDF_MAX + 1];
+        Bsdf*       bsdf;
         if (hit.obj == 2) {
             bsdl::spi::DiffuseLobe<Bsdf>::Data ground_data{ globals.Nf };
-            bsdf = new (&bsdf_storage) bsdl::spi::DiffuseLobe<Bsdf>(
-                reinterpret_cast<bsdl::spi::DiffuseLobe<Bsdf>*>(&bsdf_storage),
+            bsdf = new (&storage[0]) bsdl::spi::DiffuseLobe<Bsdf>(
+                reinterpret_cast<bsdl::spi::DiffuseLobe<Bsdf>*>(&storage[0]),
                 bsdl::BsdfGlobals(globals.wo,
                                   globals.Nf,
                                   globals.Ngf,
@@ -109,47 +189,14 @@ Imath::C3f trace(const SimpleSphere&                scene,
                 ground_data);
             bsdf->set_weight(ground_color(scene, globals.P));
         } else {
-            BsdfDataStorage shaded_data;
-            shade(shaded_data, description, data, globals, assignments);
-            bsdf = description.create_lobe(&bsdf_storage,
-                                           &shaded_data,
-                                           globals.wo,
-                                           globals.Nf,
-                                           globals.Ngf,
-                                           globals.backfacing,
-                                           globals.path_roughness,
-                                           globals.outer_ior,
-                                           0);
+            bsdf = shade(storage, instances, globals);
         }
 
-        const Imath::V3f wo           = globals.wo;
-        const Imath::V3f light_random = light_rng.next();
-        for (const auto& light : scene.lights) {
-            const Imath::V3f wi = sample_cone(light.direction, light.angle, light_random);
-            const bsdl::Sample sample     = bsdf->eval(wo, wi);
-            const float        light_pdf  = cone_pdf(light.angle);
-            const Ray          shadow_ray = { globals.P + wi * 1e-4f,
-                                              wi,
-                                              { 1, 1, 1 },
-                                              1e-4f,
-                                              1e30f,
-                                              globals.outer_ior,
-                                              globals.path_roughness,
-                                              light_pdf,
-                                              ray.x,
-                                              ray.y,
-                                              ray.sample_index,
-                                              ray.depth };
-            const bool visible = !scene.shadows || scene.trace(shadow_ray).obj < 0;
-            if (visible && sample.pdf > 0)
-                radiance += ray.weight * sample.weight.toRGB(0) * sample.pdf *
-                            (1.0f / light_pdf) * power_heuristic(light_pdf, sample.pdf) *
-                            light.color * light.intensity;
-        }
+        direct_lighting(scene, *bsdf, globals, ray, light_rng.next(), radiance);
 
-        const bsdl::Sample sample = bsdf->sample(wo, bsdf_rng.next());
+        const bsdl::Sample sample = bsdf->sample(globals.wo, bsdf_rng.next());
         const Imath::V3f   wi     = sample.wi;
-        if (sample.pdf <= 0)
+        if (sample.pdf <= MIN_PDF)
             break;
         ray.origin    = globals.P + wi * 1e-4f;
         ray.direction = wi;
@@ -161,7 +208,9 @@ Imath::C3f trace(const SimpleSphere&                scene,
             radiance += ray.weight * environment(scene, ray.direction, ray.pdf);
             break;
         }
-        if (depth + 1 == max_depth)
+        // The camera hit is depth 0; max_depth counts indirect continuations.
+        // Keep the BSDF-sampled environment contribution above even at the limit.
+        if (depth == max_depth)
             break;
         if (depth >= 2) {
             const float survive =
@@ -172,6 +221,7 @@ Imath::C3f trace(const SimpleSphere&                scene,
                 break;
             ray.weight /= survive;
         }
+        path_roughness = std::max(path_roughness, sample.roughness);
     }
     return radiance;
 }
@@ -290,18 +340,20 @@ Scene::BsdfGlobals SimpleSphere::globals_at_hit(const Ray& ray, const Hit& hit) 
              ray.x, ray.y,    ray.sample_index, ray.depth };
 }
 
-void render(const SimpleSphere&                scene,
-            const BsdfDescription&             description,
-            const BsdfDataStorage&             bsdf_data,
-            const std::vector<BsdfAssignment>& assignments,
-            std::vector<Imath::C3f>&           image,
-            int                                resolution,
-            int                                samples,
-            int                                depth,
-            unsigned                           seed,
-            unsigned                           threads)
+void render(const SimpleSphere&              scene,
+            const std::vector<BsdfInstance>& instances,
+            std::vector<Imath::C3f>&         image,
+            int                              resolution,
+            int                              samples,
+            int                              depth,
+            unsigned                         seed,
+            unsigned                         threads)
 {
-    image.assign(static_cast<std::size_t>(resolution * resolution), Imath::C3f(0));
+    const std::size_t side = static_cast<std::size_t>(resolution);
+    if (resolution <= 0 || side > image.max_size() / side)
+        throw std::length_error("Invalid render image size");
+    const std::size_t pixel_count = side * side;
+    image.assign(pixel_count, Imath::C3f(0));
     const unsigned worker_count =
         threads == 0 ? std::max(1u, std::thread::hardware_concurrency()) : threads;
     std::vector<std::thread> workers;
@@ -323,11 +375,10 @@ void render(const SimpleSphere&                scene,
                                     0,           1.0f,
                                     x,           y,
                                     sample,      0 };
-                        color += trace(
-                            scene, description, bsdf_data, assignments, ray, depth, seed);
+                        color += trace(scene, instances, ray, depth, seed);
                     }
-                    image[static_cast<std::size_t>(y * resolution + x)] =
-                        color / float(samples);
+                    image[static_cast<std::size_t>(y) * side +
+                          static_cast<std::size_t>(x)] = color / float(samples);
                 }
             }
         });

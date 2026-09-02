@@ -177,6 +177,18 @@ template <typename BSDF_ROOT> struct ThinLayerLobe : public Lobe<BSDF_ROOT> {
                                           bool              doreflect,
                                           bool              dorefract) const;
 
+    // Simplified interface, evaluates and samples both reflection and
+    // refraction.
+    BSDL_INLINE_METHOD Sample eval_impl(const Imath::V3f& wo, const Imath::V3f& wi) const
+    {
+        return eval_impl(wo, wi, true, true);
+    }
+    BSDL_INLINE_METHOD Sample sample_impl(const Imath::V3f& wo,
+                                          const Imath::V3f& _rnd) const
+    {
+        return sample_impl(wo, _rnd, true, true);
+    }
+
   protected:
     BSDL_INLINE_METHOD std::pair<Power, Power> get_diff_trans() const;
     BSDL_INLINE_METHOD Power                   get_tint(float cosNI) const;

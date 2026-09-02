@@ -1,6 +1,8 @@
 # BSDL Test Suite
 
-The test suite contains a compile/include test and manifest-driven image tests
+The test suite contains a compile/include test, PNG round-trip and image-size
+validation tests (`bsdltool.png`),
+exact path-depth checks (`bsdltool.depth`), and manifest-driven image tests
 for `bsdltool`.
 
 Run the suite with `./build.sh --test`. Tests run sequentially, and each
@@ -8,11 +10,13 @@ Run the suite with `./build.sh --test`. Tests run sequentially, and each
 
 ## Image-test manifest
 
-[bsdltool_tests.txt](bsdltool_tests.txt) defines one image test per non-comment
-line:
+[bsdltool_tests.ini](bsdltool_tests.ini) defines one image test per section.
+An `args` value may continue on indented lines:
 
 ```text
-name | bsdltool arguments
+[test-name]
+args = bsdltool arguments
+  more arguments
 ```
 
 `name` is both the CTest test name and the basename of its reference image.
@@ -27,13 +31,13 @@ The arguments are passed to `bsdltool`; the harness automatically adds:
 For example:
 
 ```text
-simple-diffuse | spi::basic_diffuse 0,0,1 1,1,1 0.3 0.0 -a 0:Nf --samples 8 --depth 1
+simple-diffuse | --bsdf 'spi::basic_diffuse(Nf, (1,1,1), 0.3, 0.0)' --samples 8 --depth 1
 ```
 
 The rendered output is compared with
 [references](references)/`<name>.png` using normalized RGB RMSE. The threshold
 is configured as `BSDLTOOL_TEST_DIFF_THRESHOLD` in
-[CMakeLists.txt](CMakeLists.txt); the default is $0.01$. Render settings should
+[CMakeLists.txt](CMakeLists.txt); the default is $0.001$. Render settings should
 remain deterministic so reference comparisons are stable.
 
 ## Configure, build, and run

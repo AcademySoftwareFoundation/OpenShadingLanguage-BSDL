@@ -127,6 +127,17 @@ template <typename BSDF_ROOT> struct Lobe : public BSDF_ROOT {
     }
     BSDL_INLINE_METHOD bool single_wavelength() const { return false; }
 
+    // Default lobe albedo: white. Lobes that know better override this.
+    BSDL_INLINE_METHOD Power albedo_impl() const { return Power::UNIT(); }
+
+    // Fraction of light this lobe transmits to layers below it in a layered
+    // ('over') combination, as a function of the outgoing direction in the
+    // lobe frame. Default: opaque, nothing filters through.
+    BSDL_INLINE_METHOD Power filter_o(const Imath::V3f& wo) const
+    {
+        return Power::ZERO();
+    }
+
     Frame                        frame;
     typename BsdfGlobals::Filter sample_filter;
 };

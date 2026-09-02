@@ -6,6 +6,7 @@ set -eu
 run_tests=false
 configure_only=false
 build_testing=false
+update_references=false
 test_pattern=
 
 while [ "$#" -gt 0 ]; do
@@ -19,22 +20,32 @@ while [ "$#" -gt 0 ]; do
             run_tests=true
             build_testing=true
             shift
-            if [ "$#" -gt 0 ]; then
+            # The pattern is optional; do not swallow a following option.
+            if [ "$#" -gt 0 ] && [ "${1#--}" = "$1" ]; then
                 test_pattern=$1
                 shift
             fi
             ;;
+        --update)
+            update_references=true
+            shift
+            ;;
         --help|-h)
-            printf '%s\n' "Usage: $0 [--configure] [--test [PATTERN]]"
+            printf '%s\n' "Usage: $0 [--configure] [--test [PATTERN] [--update]]"
             exit 0
             ;;
         *)
             printf '%s\n' "Unknown option: $1" >&2
-            printf '%s\n' "Usage: $0 [--configure] [--test [PATTERN]]" >&2
+            printf '%s\n' "Usage: $0 [--configure] [--test [PATTERN] [--update]]" >&2
             exit 2
             ;;
     esac
 done
+
+if "$update_references" && ! "$run_tests"; then
+    printf '%s\n' "--update only makes sense together with --test" >&2
+    exit 2
+fi
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 build_dir=${BSDL_BUILD_DIR:-"$project_dir/build"}
@@ -51,6 +62,10 @@ fi
 cmake --build "$build_dir" --parallel
 
 if "$run_tests"; then
+    if "$update_references"; then
+        printf '%s\n' "Updating reference images for the selected tests"
+        export BSDL_UPDATE_REFERENCES=1
+    fi
     if [ -n "$test_pattern" ]; then
         ctest --test-dir "$build_dir" -R "$test_pattern" --output-on-failure
     else

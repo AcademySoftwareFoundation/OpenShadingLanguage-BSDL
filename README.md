@@ -46,8 +46,7 @@ Imath, and the spectral LUT library.
 preview, and compares RGB PNG images. Render a lobe with:
 
 ```sh
-./build/bsdltool/bsdltool render spi::basic_diffuse \
-    0,0,1 1,1,1 0.3 0.0 -a 0:Nf \
+./build/bsdltool/bsdltool render --bsdf 'spi::basic_diffuse(Nf, (1,1,1), 0.3, 0.0)' \
     --samples 64 --resolution 512 -o diffuse.png
 ```
 

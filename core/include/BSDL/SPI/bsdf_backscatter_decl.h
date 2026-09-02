@@ -46,7 +46,11 @@ template <typename BSDF_ROOT> struct CharlieLobe : public Lobe<BSDF_ROOT> {
     static constexpr const char* name() { return "sheen"; }
     static constexpr const char* space() { return "spi"; }
 
-    BSDL_INLINE_METHOD Power albedo_impl() const { return Power(1 - Emiss, 1); }
+    BSDL_INLINE_METHOD Power albedo_impl() const { return tint * (1 - Emiss); }
+    BSDL_INLINE_METHOD Power filter_o(const Imath::V3f& wo) const
+    {
+        return Power(Emiss, 1);
+    }
 
     BSDL_INLINE_METHOD Sample eval_impl(const Imath::V3f& wo, const Imath::V3f& wi) const;
     BSDL_INLINE_METHOD Sample sample_impl(const Imath::V3f& wo,

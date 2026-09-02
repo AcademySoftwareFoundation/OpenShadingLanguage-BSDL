@@ -4,12 +4,14 @@ using BSDLConfig = bsdl::BSDLDefaultConfig;
 #define BSDL_CONFIG
 
 #include "bsdfs.h"
+#include "parse_bsdf.h"
 #include "png.h"
 #include "tracer.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,13 +23,13 @@ void print_usage(const char* program, const BsdfRegistry& registry)
 {
     std::fprintf(
         stderr,
-        "Usage: %s render <bsdf> [parameter values ...] [options]\n"
+        "Usage: %s render --bsdf '[(R,G,B)] NAME(ARGUMENT, ...)'\n"
+        "       [--bsdf ...] ... [options]\n"
         "       %s diff <reference.png> <result.png> [--threshold N] [--scale N] [-o "
         "FILE]\n"
         "Options: -o FILE, --output FILE --resolution N --samples N --depth N --seed N\n"
         "         --threads N\n"
         "         --exposure STOPS --noshadow --ground COLOR1 COLOR2 SCALE\n"
-        "         -a PARAMETER:GLOBAL\n"
         "         -L X,Y,Z R,G,B ANGLE_DEGREES INTENSITY\n"
         "Available BSDFs:\n",
         program,
@@ -61,35 +63,23 @@ bool parse_nonnegative_float(std::string_view text, float& value)
     return parse_float(text, value) && value >= 0;
 }
 
-bool parse_assignment(std::string_view       text,
-                      const BsdfDescription& description,
-                      BsdfAssignment&        assignment)
+// Convert a light specification (angle in degrees, integrated intensity)
+// into the renderer's representation (unit direction, radians, intensity
+// per unit solid angle). Both default lights and -L use this boundary.
+Scene::Light prepare_light(Scene::Light light)
 {
-    const std::size_t separator = text.find(':');
-    int               parameter_index;
-    if (separator == std::string_view::npos ||
-        !parse_int(text.substr(0, separator), parameter_index) || parameter_index < 0 ||
-        parameter_index >= static_cast<int>(description.parameters.size()))
-        return false;
-
-    const BsdfGlobal*      global = find_bsdf_global(text.substr(separator + 1));
-    const bsdl::LobeParam& parameter =
-        description.parameters[parameter_index].lobe_parameter;
-    if (!global || parameter.type != global->type || parameter.type_size != global->size)
-        return false;
-
-    assignment = { static_cast<std::size_t>(parameter_index), global->offset };
-    return true;
+    constexpr float degrees_to_radians = 0.01745329251994329577f;
+    light.angle *= degrees_to_radians;
+    light.direction.normalize();
+    light.intensity *= cone_pdf(light.angle);
+    return light;
 }
 
 void add_default_lights(SimpleSphere& scene)
 {
-    scene.lights = { { { -1, 0.5f, 0 }, 45.0f, { 1, 0.7f, 0.4f }, 1.0f },
-                     { { 1, 1, -0.6f }, 5.0f, { 1, 0.98f, 0.92f }, 1.0f },
-                     { { 0, 1, 0 }, 90.0f, { 0.5f, 0.8f, 0.92f }, 0.7f } };
-    constexpr float degrees_to_radians = 0.01745329251994329577f;
-    for (auto& light : scene.lights)
-        light.angle *= degrees_to_radians;
+    scene.lights = { prepare_light({ { -1, 0.5f, 0 }, 45.0f, { 1, 0.7f, 0.4f }, 1.0f }),
+                     prepare_light({ { 1, 1, -0.6f }, 5.0f, { 1, 0.98f, 0.92f }, 1.0f }),
+                     prepare_light({ { 0, 1, 0 }, 90.0f, { 0.5f, 0.8f, 0.92f }, 0.7f }) };
 }
 
 } // namespace
@@ -102,38 +92,31 @@ int render_main(int argc, char* argv[])
         return argc < 3 ? 2 : 0;
     }
 
-    const auto found = registry.find(argv[2]);
-    if (found == registry.end()) {
-        std::fprintf(stderr, "Unknown BSDF: %s\n", argv[2]);
-        return 2;
-    }
-
-    const BsdfDescription& description = found->second;
-    const int parameter_count          = static_cast<int>(description.parameters.size());
-    if (argc - 3 < parameter_count) {
-        std::fprintf(stderr,
-                     "%s expects %zu parameter values\n",
-                     argv[2],
-                     description.parameters.size());
-        return 2;
-    }
-
-    std::vector<std::string_view> values;
-    BsdfDataStorage               data{};
-    values.reserve(description.parameters.size());
-    for (int i = 3; i < 3 + parameter_count; ++i)
-        values.push_back(argv[i]);
-    if (description.create_data(&data, values) != 0)
-        return 2;
-
     std::string  output     = "bsdf.png";
     int          resolution = 512, samples = 64, depth = 1, seed = 1, threads = 0;
     float        exposure = 1;
     SimpleSphere scene;
-    std::vector<BsdfAssignment> assignments;
-    for (int i = 3 + parameter_count; i < argc;) {
+    // Each --bsdf appends a layer below the previous ones. render() combines
+    // the list with a GroupBsdf, weighting each layer by the product of the
+    // filter_o() of all the layers on top of it.
+    std::vector<BsdfInstance> instances;
+    for (int i = 2; i < argc;) {
         const std::string_view option = argv[i++];
-        if ((option == "-o" || option == "--output") && i < argc) {
+        if (option == "--bsdf" && i < argc) {
+            if (instances.size() >= GROUP_BSDF_MAX) {
+                std::fprintf(stderr,
+                             "Invalid --bsdf definition: too many layers (max %d)\n",
+                             GROUP_BSDF_MAX);
+                return 2;
+            }
+            std::string error;
+            if (auto instance = parse_bsdf(argv[i++], registry, error))
+                instances.push_back(std::move(*instance));
+            else {
+                std::fprintf(stderr, "Invalid --bsdf definition: %s\n", error.c_str());
+                return 2;
+            }
+        } else if ((option == "-o" || option == "--output") && i < argc) {
             output = argv[i++];
             continue;
         } else if (option == "--resolution" && i < argc &&
@@ -159,14 +142,6 @@ int render_main(int argc, char* argv[])
                 return 2;
             }
             scene.ground = true;
-        } else if (option == "-a" && i < argc) {
-            BsdfAssignment assignment;
-            if (!parse_assignment(argv[i++], description, assignment)) {
-                std::fprintf(stderr,
-                             "Invalid -a assignment (expected PARAMETER:GLOBAL)\n");
-                return 2;
-            }
-            assignments.push_back(assignment);
         } else if (option == "-L" && i + 3 < argc) {
             SimpleSphere::Light light;
             if (!parse_vector(argv[i++], light.direction) ||
@@ -178,26 +153,22 @@ int render_main(int argc, char* argv[])
                 std::fprintf(stderr, "Invalid -L light specification\n");
                 return 2;
             }
-            light.angle *= 0.01745329251994329577f;
-            scene.lights.push_back(light);
+            scene.lights.push_back(prepare_light(light));
         } else {
             std::fprintf(stderr, "Invalid render option: %s\n", option.data());
             return 2;
         }
     }
+    if (instances.empty()) {
+        std::fprintf(stderr, "Missing --bsdf definition\n");
+        return 2;
+    }
     if (scene.lights.empty())
         add_default_lights(scene);
-    for (auto& light : scene.lights) {
-        light.direction.normalize();
-        // normalize intensity
-        light.intensity *= cone_pdf(light.angle);
-    }
 
     std::vector<Imath::C3f> image;
     render(scene,
-           description,
-           data,
-           assignments,
+           instances,
            image,
            resolution,
            samples,
@@ -211,20 +182,27 @@ int render_main(int argc, char* argv[])
     return 0;
 }
 
+namespace
+{
+
+void print_diff_usage(const char* program)
+{
+    std::fprintf(stderr,
+                 "Usage: %s diff <reference.png> <result.png> [--threshold N] "
+                 "[--scale N] [-o FILE]\n",
+                 program);
+}
+
+} // namespace
+
 int diff_main(int argc, char* argv[])
 {
     if (argc == 3 && std::string_view(argv[2]) == "--help") {
-        std::fprintf(stderr,
-                     "Usage: %s diff <reference.png> <result.png> [--threshold N] "
-                     "[--scale N] [-o FILE]\n",
-                     argv[0]);
+        print_diff_usage(argv[0]);
         return 0;
     }
     if (argc < 4) {
-        std::fprintf(stderr,
-                     "Usage: %s diff <reference.png> <result.png> [--threshold N] "
-                     "[--scale N] [-o FILE]\n",
-                     argv[0]);
+        print_diff_usage(argv[0]);
         return 2;
     }
 
@@ -295,10 +273,15 @@ int main(int argc, char* argv[])
         return 2;
     }
     const std::string_view command = argv[1];
-    if (command == "render")
-        return render_main(argc, argv);
-    if (command == "diff")
-        return diff_main(argc, argv);
+    try {
+        if (command == "render")
+            return render_main(argc, argv);
+        if (command == "diff")
+            return diff_main(argc, argv);
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "Error: %s\n", error.what());
+        return 2;
+    }
     std::fprintf(stderr, "Unknown command: %s\n", argv[1]);
     return 2;
 }

@@ -78,8 +78,9 @@ Imath::V3f Rng::next()
         directions(result.values, 3, 1, m);
         return result;
     }();
-    constexpr float scale = 1.0f / 4294967296.0f;
-    return { (sobol(index_, direction_0) ^ scramble_) * scale,
-             (sobol(index_, direction_1.values) ^ scramble_) * scale,
-             (sobol(index_++, direction_2.values) ^ scramble_) * scale };
+    constexpr float     scale  = 1.0f / 4294967296.0f;
+    const std::uint32_t sample = index_++;
+    return { (sobol(sample, direction_0) ^ scramble_) * scale,
+             (sobol(sample, direction_1.values) ^ scramble_) * scale,
+             (sobol(sample, direction_2.values) ^ scramble_) * scale };
 }
