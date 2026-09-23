@@ -1,5 +1,8 @@
 # BSDL
 
+This is a companion repository to the [Open Shading Language (OSL)](https://github.com/AcademySoftwareFoundation/OpenShadingLanguage)
+project at the [Academy Software Foundation (ASWF)](https://www.aswf.io/).
+
 BSDL is a production, GPU-friendly bidirectional scattering distribution
 function (BSDF) library open sourced by Sony Pictures Imageworks. It provides
 header-based BSDF lobe implementations for physically based shading, including

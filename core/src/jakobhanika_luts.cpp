@@ -1,3 +1,7 @@
+// Copyright Contributors to the Open Shading Language project.
+// SPDX-License-Identifier: BSD-3-Clause
+// https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
+
 // This code was contributed to mitsuba by the authors of "A Low-Dimensional
 // Function Space for Efficient Spectral Upsampling" using TBB for parallel
 // execution, then adapted to PBRT using its own thread pool. This version uses
