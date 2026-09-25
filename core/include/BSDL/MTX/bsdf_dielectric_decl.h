@@ -44,7 +44,8 @@ template <typename Fresnel> struct DielectricBSDF {
                    const Fresnel& fresnel,
                    float          cosNO,
                    float          roughness,
-                   bool           dorefr);
+                   bool           dorefr,
+                   float          lambda_0);
 
     DielectricBSDF() = default;
 
@@ -62,9 +63,12 @@ template <typename Fresnel> struct DielectricBSDF {
     static constexpr const char* NS = "mtx";
 
   protected:
+    BSDL_INLINE_METHOD float reflection_probability(const Power& F) const;
+
     GGXDist d;
     Fresnel f;
     float   E_ms;
+    float   lambda_0;
     bool    dorefr;
 };
 

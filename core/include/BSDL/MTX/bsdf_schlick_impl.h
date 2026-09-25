@@ -74,8 +74,12 @@ BSDL_INLINE_METHOD SchlickLobe<BSDF_ROOT>::SchlickLobe(T*                 lobe,
     SchlickFresnel fresnel(F0, F90, data.exponent, refraction_ior, globals.backfacing);
 
     E_ms = 0;
-    spec = DielectricBSDF<SchlickFresnel>(
-        GGXDist(roughness, aniso, rx < ry), fresnel, cosNO, roughness, dorefr);
+    spec = DielectricBSDF<SchlickFresnel>(GGXDist(roughness, aniso, rx < ry),
+                                          fresnel,
+                                          cosNO,
+                                          roughness,
+                                          dorefr,
+                                          globals.lambda_0);
     if (dorefl && !dorefr) {
         // Energy compensation reuses the dielectric Fresnel albedo tables,
         // which assumes the Schlick curve matches the true dielectric Fresnel.

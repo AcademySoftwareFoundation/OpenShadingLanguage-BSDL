@@ -6,7 +6,6 @@
 
 #include <BSDL/MTX/bsdf_dielectric_decl.h>
 #include <BSDL/SPI/bsdf_dielectric_impl.h>
-#include <BSDL/microfacet_tools_impl.h>
 
 #ifndef BAKE_BSDL_TABLES
 #include <BSDL/MTX/bsdf_dielectric_bothback_luts.h>
@@ -67,9 +66,11 @@ BSDL_INLINE_METHOD DielectricBSDF<Fresnel>::DielectricBSDF(const GGXDist& dist,
                                                            const Fresnel& fresnel,
                                                            float          cosNO,
                                                            float          roughness,
-                                                           bool           dorefr):
+                                                           bool           dorefr,
+                                                           float          lambda_0):
     d(dist),
     f(fresnel),
+    lambda_0(lambda_0),
     dorefr(dorefr)
 {
     if (!dorefr) {
@@ -88,7 +89,8 @@ DielectricReflFront::DielectricReflFront(float cosNO,
         DielectricFresnel::from_table_index(fresnel_index, false),
         cosNO,
         roughness_index,
-        false)
+        false,
+        1)
 {
 }
 
@@ -101,7 +103,8 @@ DielectricBothFront::DielectricBothFront(float cosNO,
         DielectricFresnel::from_table_index(fresnel_index, false),
         cosNO,
         roughness_index,
-        true)
+        true,
+        1)
 {
 }
 
@@ -114,8 +117,18 @@ DielectricBothBack::DielectricBothBack(float cosNO,
         DielectricFresnel::from_table_index(fresnel_index, true),
         cosNO,
         roughness_index,
-        true)
+        true,
+        1)
 {
+}
+
+template <typename Fresnel>
+BSDL_INLINE_METHOD float
+DielectricBSDF<Fresnel>::reflection_probability(const Power& F) const
+{
+    // Fresnel may return Power::UNIT(), so mask the inactive RGB lane before
+    // averaging.
+    return F.cliped_rgb(lambda_0).avg(lambda_0);
 }
 
 template <typename Fresnel>
@@ -136,18 +149,19 @@ BSDL_INLINE_METHOD Sample DielectricBSDF<Fresnel>::eval(Imath::V3f wo,
         const float D  = d.D(m);
         const float G1 = d.G1(wo);
         const Power F  = f.eval(cosMO);
-        if (F.max() <= 0)
+        const float P  = reflection_probability(F);
+        if (P <= 0)
             return {};
         if constexpr (BSDLConfig::use_bvn_refraction) {
             // Reflection optimized density
             const float D_refl_D = d.D_refl_D(wo, m);
             const float D_refl   = D_refl_D * D;
-            const Power out      = F * (d.G2_G1(wi, wo) * G1 / (D_refl_D * F.max()));
-            const float pdf      = D_refl / (4.0f * cosNO) * F.max();
+            const Power out      = F * (d.G2_G1(wi, wo) * G1 / (D_refl_D * P));
+            const float pdf      = D_refl / (4.0f * cosNO) * P;
             return { wi, out, pdf, 0 };
         } else {
-            const Power out = F * d.G2_G1(wi, wo);
-            const float pdf = (G1 * D * F.max()) / (4.0f * cosNO);
+            const Power out = F * (d.G2_G1(wi, wo) / P);
+            const float pdf = (G1 * D * P) / (4.0f * cosNO);
             return { wi, out, pdf, 0 };
         }
     } else if (cosNI < 0) {
@@ -159,8 +173,10 @@ BSDL_INLINE_METHOD Sample DielectricBSDF<Fresnel>::eval(Imath::V3f wo,
         const float cosHI = Ht.dot(wi);
         if (cosHO <= 0 || cosHI >= 0)
             return {};
-        const Power Ft = Power::UNIT() - f.eval(cosHO);
-        if (Ht.z <= 0 || Ft.max() <= 0)
+        const Power F  = f.eval(cosHO);
+        const Power Ft = Power::UNIT() - F;
+        const float Pt = 1 - reflection_probability(F);
+        if (Ht.z <= 0 || Pt <= 0)
             return {};
         const float D  = d.D(Ht);
         const float G1 = d.G1(wo);
@@ -170,14 +186,14 @@ BSDL_INLINE_METHOD Sample DielectricBSDF<Fresnel>::eval(Imath::V3f wo,
             // Reflection optimized density
             const float D_refl_D = d.D_refl_D(wo, Ht);
             const float D_refl   = D_refl_D * D;
-            float       pdf      = D_refl * J * Ft.max();
+            float       pdf      = D_refl * J * Pt;
             const Power out =
-                Ft * (d.G2_G1({ wi.x, wi.y, -wi.z }, wo) * G1 / (D_refl_D * Ft.max()));
+                Ft * (d.G2_G1({ wi.x, wi.y, -wi.z }, wo) * G1 / (D_refl_D * Pt));
             return { wi, out, pdf, 0 };
         } else {
-            const Power out = Ft * (d.G2_G1({ wi.x, wi.y, -wi.z }, wo) / Ft.max());
+            const Power out = Ft * (d.G2_G1({ wi.x, wi.y, -wi.z }, wo) / Pt);
 
-            float pdf = J * G1 * D * Ft.max();
+            float pdf = J * G1 * D * Pt;
             return { wi, out, pdf, 0 };
         }
 
@@ -205,8 +221,8 @@ BSDL_INLINE_METHOD Sample DielectricBSDF<Fresnel>::sample(Imath::V3f wo,
     const float cosMO = wo.dot(m);
     if (cosMO <= 0)
         return {};
-    const float      F              = f.eval(cosMO).max();
-    bool             choose_reflect = randw < F;
+    const float      P              = reflection_probability(f.eval(cosMO));
+    bool             choose_reflect = randw < P;
     const Imath::V3f wi =
         choose_reflect ? reflect(wo, m) : refract(wo, m, f.refraction_eta());
     if ((choose_reflect && wi.z <= 0) || (!choose_reflect && wi.z >= 0))
@@ -255,8 +271,12 @@ BSDL_INLINE_METHOD DielectricLobe<BSDF_ROOT>::DielectricLobe(T*                 
 
     DielectricFresnel fresnel(globals.relative_eta(IOR), globals.backfacing);
     E_ms = 0;
-    spec = DielectricBSDF<DielectricFresnel>(
-        GGXDist(roughness, aniso, rx < ry), fresnel, cosNO, roughness, dorefr);
+    spec = DielectricBSDF<DielectricFresnel>(GGXDist(roughness, aniso, rx < ry),
+                                             fresnel,
+                                             cosNO,
+                                             roughness,
+                                             dorefr,
+                                             globals.lambda_0);
     if (dorefl && !dorefr) {
         E_ms = TabulatedEnergyCurve<DielectricReflFront>(roughness, fresnel.table_index())
                    .Emiss_eval(cosNO);
