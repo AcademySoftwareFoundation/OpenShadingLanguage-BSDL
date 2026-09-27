@@ -26,6 +26,8 @@ spectral Jakob-Hanika data are built and linked by CMake.
 ## Build and install
 
 BSDL requires a C++17 compiler, CMake 3.20 or newer, Imath, and zlib.
+The `BSDL::BSDL` target itself links Imath and the generated spectral LUT
+library; zlib is only needed by `bsdltool` and the PNG tests.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -82,7 +84,13 @@ Run a matching subset:
 ./build.sh --test '^metal$'
 ```
 
-References can be updated deliberately:
+Update references for the selected tests while running CTest:
+
+```sh
+./build.sh --test '^metal$' --update
+```
+
+References can also be updated deliberately:
 
 ```sh
 BSDL_UPDATE_REFERENCES=1 ctest --test-dir build --output-on-failure
