@@ -31,7 +31,7 @@ struct Scene {
         float      intensity;
     };
 
-    struct BsdfGlobals {
+    struct ShaderGlobals {
         Imath::V3f wo;
         Imath::V3f P;
         Imath::V3f N;
@@ -51,8 +51,8 @@ struct Scene {
         int obj;
     };
 
-    virtual Hit         trace(const Ray& ray) const                          = 0;
-    virtual BsdfGlobals globals_at_hit(const Ray& ray, const Hit& hit) const = 0;
+    virtual Hit           trace(const Ray& ray) const                          = 0;
+    virtual ShaderGlobals globals_at_hit(const Ray& ray, const Hit& hit) const = 0;
 
     std::vector<Light> lights;
     bool               shadows       = true;
@@ -98,8 +98,8 @@ const BsdfGlobal* find_bsdf_global(std::string_view name);
 
 struct SimpleSphere : public Scene {
     // The CSG difference of the unit sphere and a hardcoded spherical bite.
-    Hit         trace(const Ray& ray) const override;
-    BsdfGlobals globals_at_hit(const Ray& ray, const Hit& hit) const override;
+    Hit           trace(const Ray& ray) const override;
+    ShaderGlobals globals_at_hit(const Ray& ray, const Hit& hit) const override;
 
     Imath::V3f bite_center = { 1.0f, 1.0f, 1.0f };
     float      bite_radius = 1.3f;

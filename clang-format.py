@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Format every C++ source and header in this repository with clang-format 17."""
+"""Format or check formatting of every C++ source and header in this repository with clang-format 17."""
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shutil
@@ -77,6 +78,17 @@ def source_files() -> list[Path]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Format C++ sources in this repository with clang-format 17."
+    )
+    parser.add_argument(
+        "--assert",
+        action="store_true",
+        dest="assert_mode",
+        help="Check formatting without modifying files; exit non-zero if any file needs formatting.",
+    )
+    args = parser.parse_args()
+
     try:
         clang_format = find_clang_format()
     except RuntimeError as error:
@@ -88,8 +100,15 @@ def main() -> int:
         print("No .cpp or .h files found.")
         return 0
 
-    print(f"Formatting {len(files)} files with {clang_format}.")
-    subprocess.run([clang_format, "-i", *(str(path) for path in files)], check=True)
+    if args.assert_mode:
+        print(f"Checking formatting of {len(files)} files with {clang_format}.")
+        subprocess.run(
+            [clang_format, "--dry-run", "--Werror", *(str(path) for path in files)],
+            check=True,
+        )
+    else:
+        print(f"Formatting {len(files)} files with {clang_format}.")
+        subprocess.run([clang_format, "-i", *(str(path) for path in files)], check=True)
     return 0
 
 

@@ -13,6 +13,8 @@
 #include <Imath/ImathColor.h>
 #include <Imath/ImathVec.h>
 
+#include <array>
+
 BSDL_ENTER_NAMESPACE
 
 struct Sample {

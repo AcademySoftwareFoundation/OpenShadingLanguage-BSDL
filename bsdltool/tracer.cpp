@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // https://github.com/AcademySoftwareFoundation/OpenShadingLanguage
 
+#include "BSDL/tools.h"
 #include <BSDL/config.h>
 
 using BSDLConfig = bsdl::BSDLDefaultConfig;
@@ -64,9 +65,9 @@ Imath::C3f ground_color(const SimpleSphere& scene, const Imath::V3f& position)
 // Build the lobe for one BSDF instance: copy its parameter data, apply the
 // assignments from shading globals on top (with optional [A, B] float remap)
 // and construct the lobe in 'storage'.
-Bsdf* build_bsdf(BsdfStorage&              storage,
-                 const BsdfInstance&       instance,
-                 const Scene::BsdfGlobals& globals)
+Bsdf* build_bsdf(BsdfStorage&                storage,
+                 const BsdfInstance&         instance,
+                 const Scene::ShaderGlobals& globals)
 {
     const BsdfDescription& description = *instance.description;
     BsdfDataStorage        shaded_data;
@@ -103,7 +104,7 @@ Bsdf* build_bsdf(BsdfStorage&              storage,
 // (and the group's child pointers) all live in 'storage'.
 Bsdf* shade(BsdfStorage (&storage)[GROUP_BSDF_MAX + 1],
             const std::vector<BsdfInstance>& instances,
-            const Scene::BsdfGlobals&        globals)
+            const Scene::ShaderGlobals&      globals)
 {
     const int count = std::min<int>(instances.size(), GROUP_BSDF_MAX);
     Bsdf*     children[GROUP_BSDF_MAX];
@@ -121,12 +122,12 @@ Bsdf* shade(BsdfStorage (&storage)[GROUP_BSDF_MAX + 1],
 
 // Accumulate each light directly into radiance to preserve summation order
 // across path vertices. All lights share the same random sample, as before.
-void direct_lighting(const SimpleSphere&       scene,
-                     const Bsdf&               bsdf,
-                     const Scene::BsdfGlobals& globals,
-                     const Ray&                ray,
-                     const Imath::V3f&         light_random,
-                     Imath::C3f&               radiance)
+void direct_lighting(const SimpleSphere&         scene,
+                     const Bsdf&                 bsdf,
+                     const Scene::ShaderGlobals& globals,
+                     const Ray&                  ray,
+                     const Imath::V3f&           light_random,
+                     Imath::C3f&                 radiance)
 {
     for (const auto& light : scene.lights) {
         const Imath::V3f   wi = sample_cone(light.direction, light.angle, light_random);
@@ -173,8 +174,8 @@ Imath::C3f trace(const SimpleSphere&              scene,
             break;
         }
 
-        Scene::BsdfGlobals globals = scene.globals_at_hit(ray, hit);
-        globals.path_roughness     = path_roughness;
+        Scene::ShaderGlobals globals = scene.globals_at_hit(ray, hit);
+        globals.path_roughness       = path_roughness;
         // One slot per child BSDF (or the ground lobe), plus one for the
         // group that combines them.
         BsdfStorage storage[GROUP_BSDF_MAX + 1];
@@ -269,7 +270,7 @@ Scene::Hit SimpleSphere::trace(const Ray& ray) const
 
 const BsdfGlobal* find_bsdf_global(std::string_view name)
 {
-    using Globals                         = Scene::BsdfGlobals;
+    using Globals                         = Scene::ShaderGlobals;
     static constexpr BsdfGlobal globals[] = {
         { "wo", bsdl::ParamType::VECTOR, offsetof(Globals, wo), sizeof(Globals::wo) },
         { "P", bsdl::ParamType::VECTOR, offsetof(Globals, P), sizeof(Globals::P) },
@@ -304,7 +305,7 @@ const BsdfGlobal* find_bsdf_global(std::string_view name)
     return nullptr;
 }
 
-Scene::BsdfGlobals SimpleSphere::globals_at_hit(const Ray& ray, const Hit& hit) const
+Scene::ShaderGlobals SimpleSphere::globals_at_hit(const Ray& ray, const Hit& hit) const
 {
     const Imath::V3f position = ray.origin + hit.t * ray.direction;
     if (hit.obj == 2) {
@@ -336,9 +337,10 @@ Scene::BsdfGlobals SimpleSphere::globals_at_hit(const Ray& ray, const Hit& hit) 
     const Imath::V3f uv_position =
         hit.obj == 0 ? spherical_position
                      : bsdl::Frame((-bite_center).normalized()).local(spherical_position);
-    const float u   = std::acos(std::clamp(uv_position.z, -1.0f, 1.0f)) * one_over_pi;
-    const float phi = (std::atan2(uv_position.y, uv_position.x) + PI) * one_over_two_pi;
-    const float v   = 1.0f - std::abs(2.0f * phi - 1.0f);
+    const float u = std::acos(std::clamp(uv_position.z, -1.0f, 1.0f)) * one_over_pi;
+    // Gradient from left to right. Squared to compress the range to the left, because we mostly use
+    // v for roughness.
+    const float v = bsdl::pown<2>(bsdl::CLAMP(0.5f * (1 + spherical_position.x), 0, 1));
     return { wo,    position, normal,           facing_normal,      facing_normal,
              u,     v,        ray.outer_ior,    ray.path_roughness, backfacing,
              ray.x, ray.y,    ray.sample_index, ray.depth };

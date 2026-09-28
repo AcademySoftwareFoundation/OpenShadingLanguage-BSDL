@@ -1,0 +1,35 @@
+name: Format Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  clang-format:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install clang-format 17 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-17 main"
+          sudo apt-get update
+          sudo apt-get install -y clang-format-17
+
+      - name: Install clang-format 17 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@17
+          echo "$(brew --prefix llvm@17)/bin" >> "$GITHUB_PATH"
+
+      - name: Check formatting
+        run: python3 clang-format.py --assert

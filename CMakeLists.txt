@@ -5,6 +5,17 @@ cmake_minimum_required(VERSION 3.20)
 
 project(BSDL VERSION 0.1.0 LANGUAGES CXX)
 
+option(BSDL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+if(BSDL_WARNINGS_AS_ERRORS)
+    if(MSVC)
+        add_compile_options(/WX)
+    else()
+        # -Wno-error=cpp keeps intentional #warning directives from failing the build
+        # while still treating code-quality diagnostics as errors.
+        add_compile_options(-Werror -Wno-error=cpp)
+    endif()
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json")

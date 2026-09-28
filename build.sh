@@ -51,9 +51,15 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 build_dir=${BSDL_BUILD_DIR:-"$project_dir/build"}
 build_type=${CMAKE_BUILD_TYPE:-Release}
 
+# Use ccache as a compiler launcher when available to speed up rebuilds.
+if command -v ccache >/dev/null 2>&1; then
+    ccache_arg=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+fi
+
 cmake -S "$project_dir" -B "$build_dir" \
     -DCMAKE_BUILD_TYPE="$build_type" \
-    -DBUILD_TESTING="$build_testing"
+    -DBUILD_TESTING="$build_testing" \
+    ${ccache_arg:-}
 
 if "$configure_only" && ! "$run_tests"; then
     exit 0

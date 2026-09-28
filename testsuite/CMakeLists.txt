@@ -20,6 +20,11 @@ math(EXPR bsdltool_test_last "${bsdltool_test_count} - 1")
 foreach(index RANGE ${bsdltool_test_last})
 	list(GET bsdltool_tests_NAMES ${index} test_name)
 	list(GET bsdltool_tests_ARGUMENTS ${index} command_line)
+	if(DEFINED bsdltool_tests_THRESHOLD_${test_name})
+		set(test_threshold "${bsdltool_tests_THRESHOLD_${test_name}}")
+	else()
+		set(test_threshold "${BSDLTOOL_TEST_DIFF_THRESHOLD}")
+	endif()
 	separate_arguments(command_arguments UNIX_COMMAND "${command_line}")
 
 	set(output "${CMAKE_CURRENT_BINARY_DIR}/results/${test_name}.png")
@@ -31,7 +36,7 @@ foreach(index RANGE ${bsdltool_test_last})
 			"-DOUTPUT=${output}"
 			"-DREFERENCE=${reference}"
 			"-DRESOLUTION=${BSDLTOOL_TEST_RESOLUTION}"
-			"-DTHRESHOLD=${BSDLTOOL_TEST_DIFF_THRESHOLD}"
+			"-DTHRESHOLD=${test_threshold}"
 			"-DARGS=${command_arguments}"
 			"-DUPDATE_REFERENCES=${BSDL_UPDATE_REFERENCES}"
 			"-DTEST_MANIFEST=${BSDLTOOL_TEST_MANIFEST}"
