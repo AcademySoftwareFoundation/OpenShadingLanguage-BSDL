@@ -100,3 +100,18 @@ The test run writes its visual status report to
 `build/testsuite/TESTS.md`; reference updates also refresh the checked-in
 [testsuite/TESTS.md](testsuite/TESTS.md) gallery. Further test workflow details
 are in [testsuite/README.md](testsuite/README.md).
+
+## Other important information
+
+* [CONTRIBUTING](https://github.com/AcademySoftwareFoundation/OpenShadingLanguage/blob/main/CONTRIBUTING.md) has detailed instructions about the
+  development process.
+* [AI Tool Policy](https://github.com/AcademySoftwareFoundation/OpenShadingLanguage/blob/main/docs/dev/AI_Policy.md) decribes our policies on AI coding
+  assistance tools.
+* [OSL home page](http://openshadinglanguage.org)
+* [OSL GitHub page](https://github.com/AcademySoftwareFoundation/OpenShadingLanguage)
+* [OSL Documentation on ReadTheDocs](https://docs.openshadinglanguage.org)
+* [Developer mail list](https://lists.aswf.io/g/osl-dev)
+* [ASWF Slack](https://slack.aswf.io) (look for the `#openshadinglanguage` channel)
+* Biweekly Technical Steering Committee (TSC) Zoom meetings are on the [ASWF
+  Calendar](https://calendar.openshadinglanguage.org) (click on the OSL
+  meeting entries, every second Monday, to get the Zoom link, anyone may join)
