@@ -1,7 +1,7 @@
 # Copyright Contributors to the Open Shading Language project.
 # SPDX-License-Identifier: BSD-3-Clause
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.23)
 
 project(BSDL VERSION 0.1.0 LANGUAGES CXX)
 
