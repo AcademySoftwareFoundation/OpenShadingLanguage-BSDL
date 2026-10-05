@@ -1,4 +1,4 @@
-Copyright (c) 2024-present Contributors to the OSL/BSDL project.
+Copyright (c) Contributors to the Open Shading Language project.
 All Rights Reserved.
 
 Redistribution and use in source and binary forms, with or without
